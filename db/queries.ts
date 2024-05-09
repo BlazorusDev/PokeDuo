@@ -2,7 +2,7 @@ import { cache } from "react";
 import db from "./drizzle";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
-import { courses, units, userProgress } from "./schema";
+import { challengeProgress, courses, units, userProgress } from "./schema";
 
 export const getUserProgress = cache(async () => {
   const { userId } = await auth();
@@ -21,20 +21,24 @@ export const getUserProgress = cache(async () => {
 });
 
 export const getUnits = cache(async () => {
+  const { userId } = auth();
   const userProgress = await getUserProgress();
 
-  if (!userProgress?.activeCourseId) {
-    return [];
-  }
+  if (!userId || !userProgress?.activeCourseId) return [];
 
   const data = await db.query.units.findMany({
     where: eq(units.courseId, userProgress.activeCourseId),
+    orderBy: (units, { asc }) => [asc(units.order)],
     with: {
       lessons: {
+        orderBy: (lessons, { asc }) => [asc(lessons.order)],
         with: {
           challenges: {
+            orderBy: (challenges, { asc }) => [asc(challenges.order)],
             with: {
-              challengeProgress: true,
+              challengeProgress: {
+                where: eq(challengeProgress.userId, userId),
+              },
             },
           },
         },
@@ -44,6 +48,9 @@ export const getUnits = cache(async () => {
 
   const normalizedData = data.map((unit) => {
     const lessonsWithCompletedStatus = unit.lessons.map((lesson) => {
+      if (lesson.challenges.length === 0)
+        return { ...lesson, completed: false };
+
       const allCompletedChallenges = lesson.challenges.every((challenge) => {
         return (
           challenge.challengeProgress &&
@@ -51,9 +58,11 @@ export const getUnits = cache(async () => {
           challenge.challengeProgress.every((progress) => progress.completed)
         );
       });
+
       return { ...lesson, completed: allCompletedChallenges };
     });
-    return { ...units, lessons: lessonsWithCompletedStatus };
+
+    return { ...unit, lessons: lessonsWithCompletedStatus };
   });
 
   return normalizedData;
