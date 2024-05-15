@@ -2,6 +2,7 @@
 
 import { challengeOptions, challenges } from "@/db/schema";
 import { useState } from "react";
+import { Header } from "./header";
 
 type QuizProps = {
   initialPercentage: number;
